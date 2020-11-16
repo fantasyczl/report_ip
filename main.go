@@ -1,17 +1,29 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"net"
+	"os"
+
+	"github.com/go-redis/redis/v8"
+	"gopkg.in/yaml.v2"
 )
 
-var conf *Conf
+var g_conf *Conf
+
+const CONF_FILE = "./conf/config.yaml"
 
 func main() {
 	fmt.Println("vim-go")
+	var err error
 
-	parseConf()
+	if g_conf, err = parseConf(CONF_FILE); err != nil {
+		log.Fatalf("parse conf failed, %s", err)
+	}
 
 	ip, err := getLocalIP()
 	if err != nil {
@@ -20,6 +32,9 @@ func main() {
 	}
 
 	log.Printf("Local IP:%s", ip.String())
+
+	// set ip to content
+	reportIP(g_conf, ip)
 }
 
 // conf
@@ -28,16 +43,47 @@ type RedisConf struct {
 	Port int    `yaml:"port"`
 }
 
-type Conf struct {
-	Redis *RedisConf `yaml:"redis"`
+func (r *RedisConf) Address() string {
+	return fmt.Sprintf("%s:%d", r.Host, r.Port)
 }
 
-func parseConf() (*Conf, error) {
+type Conf struct {
+	Redis *RedisConf `yaml:"redis"`
+	IPKey string     `yaml:"ip_key"`
+}
+
+func parseConf(filename string) (*Conf, error) {
+	if ex, err := isExist(filename); err != nil {
+		return nil, err
+	} else if !ex {
+		return nil, errors.New("filepath does not exist")
+	}
+
+	bytes, err := ioutil.ReadFile(filename)
+	if err != nil {
+		return nil, err
+	}
+
 	conf := new(Conf)
+	err = yaml.Unmarshal(bytes, &conf)
+	return conf, err
+}
 
-	// TODO
+func isExist(filepath string) (bool, error) {
+	if filepath == "" {
+		return false, nil
+	}
 
-	return conf, nil
+	fileinfo, err := os.Stat(filepath)
+	if err != nil {
+		return false, err
+	}
+
+	if fileinfo.IsDir() {
+		return false, nil
+	}
+
+	return true, nil
 }
 
 func getLocalIP() (ip net.IP, err error) {
@@ -77,5 +123,31 @@ func getLocalIP() (ip net.IP, err error) {
 	return
 }
 
-func reportIP() {
+var redisClient *redis.Client
+
+func getRedisClient(conf *Conf) *redis.Client {
+	if redisClient != nil {
+		return redisClient
+	}
+
+	redisClient := redis.NewClient(&redis.Options{
+		Addr:     conf.Redis.Address(),
+		Password: "", // no password set
+		DB:       0,  // use default DB
+	})
+
+	return redisClient
+}
+
+func reportIP(conf *Conf, ip net.IP) {
+	redisClient = getRedisClient(conf)
+
+	var ctx = context.Background()
+	err := redisClient.Set(ctx, conf.IPKey, ip.String(), 0).Err()
+	if err != nil {
+		log.Printf("redis set failed, %s\n", err)
+		return
+	}
+
+	log.Printf("set to redis successfully")
 }
