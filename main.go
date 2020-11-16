@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -18,12 +19,23 @@ var g_conf *Conf
 const CONF_FILE = "./conf/config.yaml"
 
 func main() {
-	fmt.Println("vim-go")
-	var err error
+	var isServer = flag.Bool("server", false, "run app as server")
+	flag.Parse()
 
+	var err error
 	if g_conf, err = parseConf(CONF_FILE); err != nil {
 		log.Fatalf("parse conf failed, %s", err)
 	}
+
+	if *isServer {
+		serverMode()
+	} else {
+		clientMode()
+	}
+}
+
+func serverMode() {
+	log.Println("server mode")
 
 	ip, err := getLocalIP()
 	if err != nil {
@@ -35,6 +47,17 @@ func main() {
 
 	// set ip to content
 	reportIP(g_conf, ip)
+}
+
+func clientMode() {
+	fmt.Println("client mode, read ip from redis")
+
+	ip, err := readIP(g_conf)
+	if err != nil {
+		log.Println("read ip failed")
+	} else {
+		log.Printf("IP: %s\n", ip)
+	}
 }
 
 // conf
@@ -150,4 +173,17 @@ func reportIP(conf *Conf, ip net.IP) {
 	}
 
 	log.Printf("set to redis successfully")
+}
+
+func readIP(conf *Conf) (string, error) {
+	redisClient = getRedisClient(conf)
+
+	var ctx = context.Background()
+	ret, err := redisClient.Get(ctx, conf.IPKey).Result()
+	if err != nil {
+		log.Printf("redis set failed, %s\n", err)
+		return "", err
+	}
+
+	return ret, nil
 }
