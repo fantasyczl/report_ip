@@ -10,6 +10,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/go-redis/redis/v8"
@@ -18,14 +19,15 @@ import (
 
 var g_conf *Conf
 
-const CONF_FILE = "./conf/config.yaml"
+const CONF_FILE = ".report_ip/config.yaml"
 
 func main() {
 	var isServer = flag.Bool("server", false, "run app as server")
 	flag.Parse()
 
+	confPath := getConfPath()
 	var err error
-	if g_conf, err = parseConf(CONF_FILE); err != nil {
+	if g_conf, err = parseConf(confPath); err != nil {
 		log.Fatalf("parse conf failed, %s", err)
 	}
 
@@ -34,6 +36,11 @@ func main() {
 	} else {
 		clientMode()
 	}
+}
+
+func getConfPath() string {
+	home := os.Getenv("HOME")
+	return filepath.Join(home, CONF_FILE)
 }
 
 func serverMode() {
