@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"time"
 
 	"github.com/go-redis/redis/v8"
 	"gopkg.in/yaml.v2"
@@ -54,9 +56,9 @@ func clientMode() {
 
 	ip, err := readIP(g_conf)
 	if err != nil {
-		log.Println("read ip failed")
+		log.Printf("read ip failed, err:%s\n", err)
 	} else {
-		log.Printf("IP: %s\n", ip)
+		log.Printf("Ret: %s\n", ip.String())
 	}
 }
 
@@ -162,12 +164,33 @@ func getRedisClient(conf *Conf) *redis.Client {
 	return redisClient
 }
 
+type ReportIPRet struct {
+	ReportTime int64  `json:"reportTime"`
+	IP         string `json:"IP"`
+}
+
+func (r *ReportIPRet) String() string {
+	t := time.Unix(r.ReportTime, 0).In(time.Local)
+
+	return fmt.Sprintf("Time: %s\t\t\tIP: %s", t, r.IP)
+}
+
 func reportIP(conf *Conf, ip net.IP) {
+	ret := ReportIPRet{
+		ReportTime: time.Now().Unix(),
+		IP:         ip.String(),
+	}
+
+	bs, err := json.Marshal(ret)
+	if err != nil {
+		log.Printf("json marshal failed")
+		return
+	}
+
 	redisClient = getRedisClient(conf)
 
 	var ctx = context.Background()
-	err := redisClient.Set(ctx, conf.IPKey, ip.String(), 0).Err()
-	if err != nil {
+	if err = redisClient.Set(ctx, conf.IPKey, string(bs), 0).Err(); err != nil {
 		log.Printf("redis set failed, %s\n", err)
 		return
 	}
@@ -175,15 +198,20 @@ func reportIP(conf *Conf, ip net.IP) {
 	log.Printf("set to redis successfully")
 }
 
-func readIP(conf *Conf) (string, error) {
+func readIP(conf *Conf) (*ReportIPRet, error) {
 	redisClient = getRedisClient(conf)
 
 	var ctx = context.Background()
 	ret, err := redisClient.Get(ctx, conf.IPKey).Result()
 	if err != nil {
-		log.Printf("redis set failed, %s\n", err)
-		return "", err
+		log.Printf("redis get failed, %s\n", err)
+		return nil, err
 	}
 
-	return ret, nil
+	ipRet := ReportIPRet{}
+	if err := json.Unmarshal([]byte(ret), &ipRet); err != nil {
+		return nil, err
+	}
+
+	return &ipRet, nil
 }
